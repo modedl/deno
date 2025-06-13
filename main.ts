@@ -11,10 +11,10 @@ const credit = Deno.env.get('CREDIT') || 'DenoBy-ModsBots';
 
 // ⚙️ Timeout and performance tuning via environment variables
 const WS_HEARTBEAT_INTERVAL = parseInt(Deno.env.get("WS_HEARTBEAT_INTERVAL") || "30000", 10); // ms
-const DNS_TIMEOUT = parseInt(Deno.env.get("DNS_TIMEOUT") || "15000", 10); // ms
-const TCP_CONNECT_TIMEOUT = parseInt(Deno.env.get("TCP_CONNECT_TIMEOUT") || "10000", 10); // ms
-const READ_BUFFER_SIZE = parseInt(Deno.env.get("READ_BUFFER_SIZE") || "32768", 10);
-const WRITE_BUFFER_SIZE = parseInt(Deno.env.get("WRITE_BUFFER_SIZE") || "16384", 10);
+const DNS_TIMEOUT = parseInt(Deno.env.get("DNS_TIMEOUT") || "150000", 10); // ms
+const TCP_CONNECT_TIMEOUT = parseInt(Deno.env.get("TCP_CONNECT_TIMEOUT") || "100000", 10); // ms
+const READ_BUFFER_SIZE = parseInt(Deno.env.get("READ_BUFFER_SIZE") || "327680", 10);
+const WRITE_BUFFER_SIZE = parseInt(Deno.env.get("WRITE_BUFFER_SIZE") || "163840", 10);
 
 console.log(`Using UUID from environment: ${userID}`);
 console.log(Deno.version);
