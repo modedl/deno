@@ -18,7 +18,6 @@ Deno.serve(async (request: Request) => {
     const url = new URL(request.url);
     switch (url.pathname) {
       case '/': {
-        // HTML welcome page
         const htmlContent = `
 <!DOCTYPE html>
 <html lang="en">
@@ -39,7 +38,6 @@ Deno.serve(async (request: Request) => {
       case `/${userID}`: {
         const hostName = url.hostname;
         const port = url.port || 443;
-
         const vlessMain = `vless://${userID}@${hostName}:${port}?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2048#${credit}`;
         const clashMetaConfig = `
 - type: vless
@@ -57,7 +55,6 @@ Deno.serve(async (request: Request) => {
     headers:
       host: ${hostName}
 `;
-
         const htmlConfigContent = `
 <!DOCTYPE html>
 <html lang="en">
@@ -87,12 +84,30 @@ Deno.serve(async (request: Request) => {
 });
 
 async function vlessOverWSHandler(request: Request) {
-  const { socket, response } = Deno.upgradeWebSocket(request);
+  const { socket, response } = Deno.upgradeWebSocket(request, {
+    perMessageDeflate: true, // Enable compression
+  });
+
   let address = '';
   let portWithRandomLog = '';
+  let heartbeatInterval: number;
 
   const log = (info: string) => {
     console.log(`[${address}:${portWithRandomLog}] ${info}`);
+  };
+
+  // Heartbeat ping to keep connection alive
+  socket.onopen = () => {
+    heartbeatInterval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(new TextEncoder().encode(JSON.stringify({ type: "ping" })));
+      }
+    }, 30_000); // Send every 30s
+  };
+
+  socket.onclose = () => {
+    clearInterval(heartbeatInterval);
+    log("WebSocket closed");
   };
 
   const readableWebSocketStream = makeReadableWebSocketStream(socket, request.headers.get('sec-websocket-protocol') || '', log);
@@ -153,7 +168,6 @@ async function vlessOverWSHandler(request: Request) {
   return response;
 }
 
-// --- Remaining Functions (unchanged unless specified) ---
 function isValidUUID(uuid: string): boolean {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   return uuidRegex.test(uuid);
@@ -166,6 +180,7 @@ function processVlessHeader(vlessBuffer: ArrayBuffer, userID: string) {
 
   const version = new Uint8Array(vlessBuffer.slice(0, 1));
   const uuid = stringify(new Uint8Array(vlessBuffer.slice(1, 17)));
+
   if (uuid !== userID) {
     return { hasError: true, message: 'invalid user' };
   }
@@ -186,6 +201,7 @@ function processVlessHeader(vlessBuffer: ArrayBuffer, userID: string) {
 
   const addressIndex = portIndex + 2;
   const addressType = new Uint8Array(vlessBuffer.slice(addressIndex, addressIndex + 1))[0];
+
   let addressValue = '';
   let addressLength = 0;
   let addressValueIndex = addressIndex + 1;
@@ -193,7 +209,8 @@ function processVlessHeader(vlessBuffer: ArrayBuffer, userID: string) {
   switch (addressType) {
     case 1:
       addressLength = 4;
-      addressValue = new Uint8Array(vlessBuffer.slice(addressValueIndex, addressValueIndex + addressLength)).join('.');
+      const bytes = new Uint8Array(vlessBuffer, addressValueIndex, addressLength);
+      addressValue = `${bytes[0]}.${bytes[1]}.${bytes[2]}.${bytes[3]}`;
       break;
     case 2:
       addressLength = new Uint8Array(vlessBuffer.slice(addressValueIndex, addressValueIndex + 1))[0];
@@ -251,6 +268,7 @@ function makeReadableWebSocketStream(webSocket: WebSocket, earlyDataHeader: stri
       webSocket.onmessage = (event) => controller.enqueue(event.data);
       webSocket.onclose = () => controller.close();
       webSocket.onerror = (err) => controller.error(err);
+
       const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
       if (error) controller.error(error);
       if (earlyData) controller.enqueue(earlyData);
@@ -276,9 +294,11 @@ async function handleTCPOutBound(
   await tcpSocket.write(new Uint8Array(rawClientData));
 
   tcpSocket.readable.pipeTo(new WritableStream({
+    highWaterMark: 32768,
+    size: 16384,
     write(chunk) {
-      if (webSocket.readyState === 1) {
-        if (vlessResponseHeader) {
+      if (webSocket.readyState === WebSocket.OPEN) {
+        if (vlessResponseHeader.byteLength > 0) {
           webSocket.send(new Uint8Array([...vlessResponseHeader, ...chunk]));
           vlessResponseHeader = new Uint8Array(0);
         } else {
@@ -307,15 +327,16 @@ async function handleUDPOutBound(webSocket: WebSocket, vlessResponseHeader: Uint
 
   transformStream.readable.pipeTo(new WritableStream({
     async write(chunk) {
-      const resp = await fetch('https://1.1.1.1/dns-query',  {
+      const resp = await fetchWithTimeout('https://1.1.1.1/dns-query',  {
         method: 'POST',
         headers: { 'content-type': 'application/dns-message' },
         body: chunk,
-      });
+      }, 15000);
+
       const dnsQueryResult = await resp.arrayBuffer();
       const udpSizeBuffer = new Uint8Array([(dnsQueryResult.byteLength >> 8) & 0xff, dnsQueryResult.byteLength & 0xff]);
 
-      if (webSocket.readyState === 1) {
+      if (webSocket.readyState === WebSocket.OPEN) {
         webSocket.send(new Uint8Array([...udpSizeBuffer, ...new Uint8Array(dnsQueryResult)]));
       }
     },
@@ -334,5 +355,21 @@ function safeCloseWebSocket(socket: WebSocket) {
     if (socket.readyState === 1 || socket.readyState === 2) socket.close();
   } catch (e) {
     console.error("Failed to safely close WebSocket:", e);
+  }
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeout = 10_000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return res;
+  } catch (e) {
+    clearTimeout(id);
+    throw e;
   }
 }
