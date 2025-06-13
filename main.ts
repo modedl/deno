@@ -10,7 +10,7 @@ const proxyIP = Deno.env.get('PROXYIP') || '';
 const credit = Deno.env.get('CREDIT') || 'DenoBy-ModsBots';
 
 // ⚙️ Timeout and performance tuning via environment variables
-const WS_HEARTBEAT_INTERVAL = parseInt(Deno.env.get("WS_HEARTBEAT_INTERVAL") || "300", 10); // ms
+const WS_HEARTBEAT_INTERVAL = parseInt(Deno.env.get("WS_HEARTBEAT_INTERVAL") || "50000", 10); // ms
 const DNS_TIMEOUT = parseInt(Deno.env.get("DNS_TIMEOUT") || "150000", 10); // ms
 const TCP_CONNECT_TIMEOUT = parseInt(Deno.env.get("TCP_CONNECT_TIMEOUT") || "100000", 10); // ms
 const READ_BUFFER_SIZE = parseInt(Deno.env.get("READ_BUFFER_SIZE") || "327680", 10);
