@@ -1,9 +1,21 @@
-// proxy.ts
-
 // Replace with your public proxy (e.g., ngrok URL)
-const PUBLIC_PROXY = "https://abc123xyz.ngrok.io"; 
+const PUBLIC_PROXY = "dev.my-project-h842.diploi.app"; 
 
-export default async function handler(req: Request): Promise<Response> {
+// Filter out forbidden headers
+function filterHeaders(headers: Headers): HeadersInit {
+  const filtered: Record<string, string> = {};
+  const forbidden = ["host", "origin", "referer"];
+
+  for (const [key, value] of headers.entries()) {
+    if (!forbidden.includes(key.toLowerCase())) {
+      filtered[key] = value;
+    }
+  }
+
+  return filtered;
+}
+
+Deno.serve(async (req) => {
   const url = new URL(req.url);
   const path = url.pathname;
   const search = url.search;
@@ -26,18 +38,4 @@ export default async function handler(req: Request): Promise<Response> {
     console.error("Proxy error:", err);
     return new Response("Error proxying request", { status: 500 });
   }
-}
-
-// Filter out forbidden headers
-function filterHeaders(headers: Headers): HeadersInit {
-  const filtered: Record<string, string> = {};
-  const forbidden = ["host", "origin", "referer"];
-
-  for (const [key, value] of headers.entries()) {
-    if (!forbidden.includes(key.toLowerCase())) {
-      filtered[key] = value;
-    }
-  }
-
-  return filtered;
-}
+});
