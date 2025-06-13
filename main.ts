@@ -1,41 +1,61 @@
-// Replace with your public proxy (e.g., ngrok URL)
-const PUBLIC_PROXY = "dev-2.my-project-9l6h.diploi.app"; 
+// relay.ts
 
-// Filter out forbidden headers
-function filterHeaders(headers: Headers): HeadersInit {
-  const filtered: Record<string, string> = {};
-  const forbidden = ["host", "origin", "referer"];
+const BACKEND_URL = "wss://dev-2.my-project-9l6h.diploi.app";
 
-  for (const [key, value] of headers.entries()) {
-    if (!forbidden.includes(key.toLowerCase())) {
-      filtered[key] = value;
+export default {
+  fetch: (req) => {
+    const upgrade = req.headers.get("upgrade") || "";
+    if (upgrade.toLowerCase() !== "websocket") {
+      return new Response("Expected Upgrade: websocket", { status: 426 });
     }
-  }
 
-  return filtered;
-}
+    // Create a WebSocket pair: [client (to browser), backend (to us)]
+    const [client, remote] = Deno.upgradeWebSocket(req);
 
-Deno.serve(async (req) => {
-  const url = new URL(req.url);
-  const path = url.pathname;
-  const search = url.search;
+    // Connect to your real backend server
+    const backendSocket = new WebSocket(BACKEND_URL);
 
-  const targetUrl = `${PUBLIC_PROXY}${path}${search}`;
+    // Pipe messages from client -> backend
+    remote.onmessage = (event) => {
+      if (backendSocket.readyState === WebSocket.OPEN) {
+        backendSocket.send(event.data);
+      } else {
+        console.error("Backend WebSocket not open. Dropping message.");
+      }
+    };
 
-  try {
-    const res = await fetch(targetUrl, {
-      method: req.method,
-      headers: filterHeaders(req.headers),
-      body: req.body,
+    // Pipe messages from backend -> client
+    backendSocket.onmessage = (event) => {
+      if (remote.readyState === WebSocket.OPEN) {
+        remote.send(event.data);
+      } else {
+        console.error("Client WebSocket not open. Dropping message.");
+      }
+    };
+
+    // Handle backend close
+    backendSocket.onclose = () => {
+      if (remote.readyState === WebSocket.OPEN) {
+        remote.close();
+      }
+    };
+
+    // Handle backend error
+    backendSocket.onerror = (err) => {
+      console.error("Error with backend WebSocket:", err);
+      remote.close();
+    };
+
+    // Optional: Handle client close
+    remote.onclose = () => {
+      if (backendSocket.readyState === WebSocket.OPEN) {
+        backendSocket.close();
+      }
+    };
+
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
     });
-
-    return new Response(res.body, {
-      status: res.status,
-      statusText: res.statusText,
-      headers: filterHeaders(res.headers),
-    });
-  } catch (err) {
-    console.error("Proxy error:", err);
-    return new Response("Error proxying request", { status: 500 });
-  }
-});
+  },
+};
