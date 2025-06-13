@@ -1,5 +1,5 @@
 // Replace with your public proxy (e.g., ngrok URL)
-const PUBLIC_PROXY = "dev.my-project-h842.diploi.app"; 
+const PUBLIC_PROXY = "dev-2.my-project-9l6h.diploi.app"; 
 
 // Filter out forbidden headers
 function filterHeaders(headers: Headers): HeadersInit {
