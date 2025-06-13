@@ -1,5 +1,7 @@
 // proxy.ts
-const PUBLIC_PROXY = "https://abc123xyz.ngrok.io";  // Replace with your ngrok URL
+
+// Replace with your public proxy (e.g., ngrok URL)
+const PUBLIC_PROXY = "https://abc123xyz.ngrok.io"; 
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
