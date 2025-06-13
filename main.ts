@@ -1,6 +1,6 @@
 // relay.ts
 
-const BACKEND_URL = "wss://dev-2.my-project-9l6h.diploi.app";
+const BACKEND_URL = "wss://argo.modsbots.com";
 
 export default {
   fetch: (req) => {
