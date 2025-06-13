@@ -1,13 +1,20 @@
 import { exists } from "https://deno.land/std/fs/exists.ts";  // You can remove this import if not used elsewhere
 
-// === Configuration ===
-const envUUID = Deno.env.get('UUID') || 'e5185305-1984-4084-81e0-f77271159c62';
+// === Configuration via Environment Variables ===
+const envUUID = Deno.env.get("UUID");
 if (!envUUID || !isValidUUID(envUUID)) {
   throw new Error("UUID must be set via environment variable and must be valid.");
 }
 const userID = envUUID;
 const proxyIP = Deno.env.get('PROXYIP') || '';
 const credit = Deno.env.get('CREDIT') || 'DenoBy-ModsBots';
+
+// ⚙️ Timeout and performance tuning via environment variables
+const WS_HEARTBEAT_INTERVAL = parseInt(Deno.env.get("WS_HEARTBEAT_INTERVAL") || "30000", 10); // ms
+const DNS_TIMEOUT = parseInt(Deno.env.get("DNS_TIMEOUT") || "15000", 10); // ms
+const TCP_CONNECT_TIMEOUT = parseInt(Deno.env.get("TCP_CONNECT_TIMEOUT") || "10000", 10); // ms
+const READ_BUFFER_SIZE = parseInt(Deno.env.get("READ_BUFFER_SIZE") || "32768", 10);
+const WRITE_BUFFER_SIZE = parseInt(Deno.env.get("WRITE_BUFFER_SIZE") || "16384", 10);
 
 console.log(`Using UUID from environment: ${userID}`);
 console.log(Deno.version);
@@ -85,7 +92,7 @@ Deno.serve(async (request: Request) => {
 
 async function vlessOverWSHandler(request: Request) {
   const { socket, response } = Deno.upgradeWebSocket(request, {
-    perMessageDeflate: true, // Enable compression
+    perMessageDeflate: true, // Optional compression
   });
 
   let address = '';
@@ -98,11 +105,12 @@ async function vlessOverWSHandler(request: Request) {
 
   // Heartbeat ping to keep connection alive
   socket.onopen = () => {
+    log("WebSocket opened");
     heartbeatInterval = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(new TextEncoder().encode(JSON.stringify({ type: "ping" })));
       }
-    }, 30_000); // Send every 30s
+    }, WS_HEARTBEAT_INTERVAL);
   };
 
   socket.onclose = () => {
@@ -289,18 +297,24 @@ async function handleTCPOutBound(
   vlessResponseHeader: Uint8Array,
   log: (info: string) => void
 ) {
-  const tcpSocket = await Deno.connect({ hostname: addressRemote, port: portRemote });
+  const tcpSocket = await Promise.race([
+    Deno.connect({ hostname: addressRemote, port: portRemote }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("TCP connect timeout")), TCP_CONNECT_TIMEOUT)
+    ),
+  ]);
+
   remoteSocket.value = tcpSocket;
   await tcpSocket.write(new Uint8Array(rawClientData));
 
   tcpSocket.readable.pipeTo(new WritableStream({
-    highWaterMark: 32768,
-    size: 16384,
+    highWaterMark: READ_BUFFER_SIZE,
+    size: WRITE_BUFFER_SIZE,
     write(chunk) {
       if (webSocket.readyState === WebSocket.OPEN) {
         if (vlessResponseHeader.byteLength > 0) {
           webSocket.send(new Uint8Array([...vlessResponseHeader, ...chunk]));
-          vlessResponseHeader = new Uint8Array(0);
+          vlessResponseHeader.set([]);
         } else {
           webSocket.send(chunk);
         }
@@ -331,7 +345,7 @@ async function handleUDPOutBound(webSocket: WebSocket, vlessResponseHeader: Uint
         method: 'POST',
         headers: { 'content-type': 'application/dns-message' },
         body: chunk,
-      }, 15000);
+      }, DNS_TIMEOUT);
 
       const dnsQueryResult = await resp.arrayBuffer();
       const udpSizeBuffer = new Uint8Array([(dnsQueryResult.byteLength >> 8) & 0xff, dnsQueryResult.byteLength & 0xff]);
@@ -352,7 +366,9 @@ async function handleUDPOutBound(webSocket: WebSocket, vlessResponseHeader: Uint
 
 function safeCloseWebSocket(socket: WebSocket) {
   try {
-    if (socket.readyState === 1 || socket.readyState === 2) socket.close();
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
+      socket.close();
+    }
   } catch (e) {
     console.error("Failed to safely close WebSocket:", e);
   }
